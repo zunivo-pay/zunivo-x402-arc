@@ -89,7 +89,7 @@ export function createX402Fetch({
     // 3. pay on Arc. Zunivo backend: pay the minted order via our verified router.
     const orderId = accept.extra?.zunivoOrderId;
     if (!orderId) throw new Error("Zunivo backend expected extra.zunivoOrderId in requirements");
-    // Settle to the resolved 20-byte address (a .zunivo name is resolved server-side and
+    // Settle to the resolved 20-byte address (a .agent name is resolved server-side and
     // returned as extra.payToAddress). Fall back to payTo only if it is already an address.
     const merchant = accept.extra?.payToAddress || accept.payTo;
     if (!/^0x[0-9a-fA-F]{40}$/.test(merchant)) {

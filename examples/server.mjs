@@ -1,7 +1,7 @@
 /**
  * Example: a paid API on Arc, x402-standard.
  *
- *   ZUNIVO_API=https://api.zunivo.io ZUNIVO_KEY=zk_... PAY_TO=you.zunivo \
+ *   ZUNIVO_API=https://api.zunivo.io ZUNIVO_KEY=zk_... PAY_TO=you.agent \
  *     npm run example:server
  *
  * A standards-compliant x402 client (including our agent example, or any x402 agent
@@ -14,7 +14,7 @@ const app = express();
 
 const pay = paymentRequired({
   price: process.env.PRICE ?? "0.05",
-  payTo: process.env.PAY_TO ?? "bbb.zunivo",
+  payTo: process.env.PAY_TO ?? "bbb.agent",
   zunivoApi: process.env.ZUNIVO_API ?? "https://api.zunivo.io",
   zunivoKey: process.env.ZUNIVO_KEY ?? "",
   description: "ZUNIVO-CRYPTO-10 live index",
