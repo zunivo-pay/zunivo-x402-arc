@@ -14,7 +14,7 @@
  *
  * Three lines to protect any route:
  *   import { paymentRequired } from "@zunivo/x402-arc";
- *   const pay = paymentRequired({ price: "0.05", payTo: "you.zunivo", zunivoApi, zunivoKey });
+ *   const pay = paymentRequired({ price: "0.05", payTo: "you.agent", zunivoApi, zunivoKey });
  *   app.get("/v1/data", pay, handler);
  */
 import { resolveNetwork, toUsdcBaseUnits, encodeHeader, decodeHeader } from "./arc.mjs";

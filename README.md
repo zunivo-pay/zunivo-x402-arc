@@ -11,7 +11,7 @@ import express from "express";
 import { paymentRequired } from "@zunivo/x402-arc";
 
 const app = express();
-const pay = paymentRequired({ price: "0.05", payTo: "you.zunivo", zunivoApi: "https://api.zunivo.io", zunivoKey: process.env.ZUNIVO_KEY });
+const pay = paymentRequired({ price: "0.05", payTo: "you.agent", zunivoApi: "https://api.zunivo.io", zunivoKey: process.env.ZUNIVO_KEY });
 app.get("/v1/data", pay, (req, res) => res.json({ premium: "…" }));
 ```
 
@@ -38,7 +38,7 @@ Arc's **native USDC gas** uses **18 decimals**; the **USDC ERC-20 interface** (w
 ## Examples
 
 ```
-ZUNIVO_API=https://api.zunivo.io ZUNIVO_KEY=zk_… PAY_TO=you.zunivo npm run example:server
+ZUNIVO_API=https://api.zunivo.io ZUNIVO_KEY=zk_… PAY_TO=you.agent npm run example:server
 AGENT_PK=0x… npm run example:agent
 ```
 
