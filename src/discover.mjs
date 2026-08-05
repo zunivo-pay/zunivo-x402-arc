@@ -42,7 +42,8 @@ export function parseAgentName(input) {
  * Returns { name, label, address, records, endpoint }.
  */
 export async function discoverAgent(name, opts = {}) {
-  const { rpcUrl, recordsAddress, namesAddress, client } = { ...DEFAULTS, ...opts };
+  const clean = Object.fromEntries(Object.entries(opts).filter(([, v]) => v !== undefined && v !== ""));
+  const { rpcUrl, recordsAddress, namesAddress, client } = { ...DEFAULTS, ...clean };
   const label = parseAgentName(name);
   if (!label) throw new Error(`discoverAgent: invalid agent name "${name}"`);
   if (!recordsAddress) {
