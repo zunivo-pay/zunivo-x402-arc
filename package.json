@@ -1,7 +1,7 @@
 {
   "name": "zunivo-x402-arc",
-  "version": "0.2.1",
-  "description": "x402 payments on Arc \u2014 pay-per-call USDC for AI agents. Standard x402 server middleware + agent client, settled on Arc Testnet.",
+  "version": "0.3.0",
+  "description": "x402 payments on Arc — pay-per-call USDC for AI agents. Standard x402 server middleware + agent client, settled on Arc Testnet.",
   "type": "module",
   "main": "src/index.mjs",
   "exports": {
