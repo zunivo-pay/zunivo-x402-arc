@@ -1,4 +1,4 @@
-# @zunivo/x402-arc
+# zunivo-x402-arc
 
 **x402 payments on Arc.** Pay-per-call USDC for AI agents — standard [x402](https://github.com/coinbase/x402) server middleware and an agent client, settled on Arc Testnet.
 
@@ -8,7 +8,7 @@ x402 is the HTTP-native payment standard (Linux Foundation governance; backed by
 
 ```js
 import express from "express";
-import { paymentRequired } from "@zunivo/x402-arc";
+import { paymentRequired } from "zunivo-x402-arc";
 
 const app = express();
 const pay = paymentRequired({ price: "0.05", payTo: "you.agent", zunivoApi: "https://api.zunivo.io", zunivoKey: process.env.ZUNIVO_KEY });
@@ -20,7 +20,7 @@ Unpaid requests get a standard `402` + `PaymentRequirements` (scheme `exact`, ne
 ## Agent — pay automatically
 
 ```js
-import { createX402Fetch } from "@zunivo/x402-arc/client";
+import { createX402Fetch } from "zunivo-x402-arc/client";
 const x402fetch = createX402Fetch({ privateKey: process.env.AGENT_PK });
 const res = await x402fetch("https://api.example.dev/v1/data"); // discovers price, pays on Arc, retries with proof
 const data = await res.json();
