@@ -85,22 +85,29 @@ export function paymentRequired(opts) {
     const resourceUrl = resource || `${req.protocol}://${req.get("host")}${req.originalUrl}`;
 
     // Build the standard PaymentRequirements for this resource.
+    // Two entries for the SAME terms, differing only in the network identifier:
+    //   accepts[0] — legacy name ("arc-testnet"): every already-shipped client matches it.
+    //   accepts[1] — CAIP-2 ("eip155:5042002"): what standards-first tooling and
+    //                catalogs (e.g. Circle's Discovery API) index by.
+    const baseAccept = {
+      scheme: "exact",
+      maxAmountRequired: toUsdcBaseUnits(price),   // 6-decimal base units
+      resource: resourceUrl,
+      description: description || `Pay ${price} USDC to access ${req.path}`,
+      mimeType: "application/json",
+      payTo,
+      maxTimeoutSeconds: 120,
+      asset: NET.usdc,
+      extra: { name: "USDC", decimals: NET.usdcDecimals, chainId: NET.chainId },
+    };
     const requirements = {
       x402Version: 1,
-      accepts: [
-        {
-          scheme: "exact",
-          network: NET.x402Network,
-          maxAmountRequired: toUsdcBaseUnits(price),   // 6-decimal base units
-          resource: resourceUrl,
-          description: description || `Pay ${price} USDC to access ${req.path}`,
-          mimeType: "application/json",
-          payTo,
-          maxTimeoutSeconds: 120,
-          asset: NET.usdc,
-          extra: { name: "USDC", decimals: NET.usdcDecimals, chainId: NET.chainId },
-        },
-      ],
+      accepts: NET.caip2
+        ? [
+            { ...baseAccept, network: NET.x402Network, extra: { ...baseAccept.extra } },
+            { ...baseAccept, network: NET.caip2, extra: { ...baseAccept.extra } },
+          ]
+        : [{ ...baseAccept, network: NET.x402Network, extra: { ...baseAccept.extra } }],
     };
 
     // No payment attached → 402 with requirements (both body and header, per spec).
@@ -111,11 +118,14 @@ export function paymentRequired(opts) {
         order = await settle.quote?.(price, payTo, `${description || "x402"} · ${req.method} ${req.path}`);
       } catch { /* quote is best-effort; requirements alone are spec-sufficient */ }
       if (order) {
-        requirements.accepts[0].extra.zunivoOrderId = order.id;
-        requirements.accepts[0].extra.payUrl = order.payUrl;
-        // resolved on-chain merchant address (name → address happens server-side);
-        // the client needs this 20-byte address to settle, not the human name.
-        if (order.to) requirements.accepts[0].extra.payToAddress = order.to;
+        // same order backs every accepts entry (they are one offer in two namings)
+        for (const a of requirements.accepts) {
+          a.extra.zunivoOrderId = order.id;
+          a.extra.payUrl = order.payUrl;
+          // resolved on-chain merchant address (name → address happens server-side);
+          // the client needs this 20-byte address to settle, not the human name.
+          if (order.to) a.extra.payToAddress = order.to;
+        }
       }
       res.setHeader("PAYMENT-REQUIRED", encodeHeader(requirements));
       return res.status(402).json(requirements);

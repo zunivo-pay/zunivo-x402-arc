@@ -19,6 +19,10 @@ export const ARC_TESTNET = {
   router: "0x4210D40a9899e42b4946B9dC7E0C35d3cf14Ea55",
   // x402 network identifier used in PaymentRequirements.network
   x402Network: "arc-testnet",
+  // CAIP-2 identifier — the standards-based name catalogs index by
+  // (Circle's Discovery API filters on this form). Emitted alongside the
+  // legacy name so both old clients and standards-first tooling match.
+  caip2: "eip155:5042002",
 };
 
 /**
@@ -37,10 +41,21 @@ export const ARC_MAINNET = {
   usdcDecimals: 6,                              // TODO: confirm on mainnet (do not assume)
   router: "0xMAINNET_ROUTER_ADDRESS_UNSET",     // TODO: mainnet ArcPayRouter deploy
   x402Network: "arc",
+  caip2: "",                                    // TODO: eip155:<mainnet chainId> once published
 };
 
-/** Networks by x402 identifier. Callers pass network:"arc"|"arc-testnet"; default stays testnet. */
-export const NETWORKS = { "arc-testnet": ARC_TESTNET, "arc": ARC_MAINNET };
+/** Networks by x402 identifier. Callers pass network:"arc"|"arc-testnet" (or the
+ *  CAIP-2 form "eip155:5042002"); default stays testnet. */
+export const NETWORKS = {
+  "arc-testnet": ARC_TESTNET,
+  "arc": ARC_MAINNET,
+  "eip155:5042002": ARC_TESTNET,   // CAIP-2 alias
+};
+
+/** True when an x402 `network` value refers to this config (legacy or CAIP-2 form). */
+export function networkMatches(cfg, value) {
+  return value === cfg.x402Network || (cfg.caip2 !== "" && value === cfg.caip2);
+}
 
 /**
  * Resolve a network config by name and REFUSE if it isn't safe to use. A mainnet whose

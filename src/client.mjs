@@ -18,7 +18,7 @@ import {
   keccak256, toHex, parseAbi, defineChain,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { resolveNetwork, encodeHeader, decodeHeader, fromUsdcBaseUnits, toUsdcBaseUnits, cmpBaseUnits } from "./arc.mjs";
+import { resolveNetwork, networkMatches, encodeHeader, decodeHeader, fromUsdcBaseUnits, toUsdcBaseUnits, cmpBaseUnits } from "./arc.mjs";
 
 const ROUTER_ABI = parseAbi(["function pay(bytes32 orderId, address merchant) payable"]);
 
@@ -58,8 +58,16 @@ export function createX402Fetch({
     const headerReq = decodeHeader(res.headers.get("PAYMENT-REQUIRED") || "");
     const bodyReq = await res.clone().json().catch(() => null);
     const req = headerReq || bodyReq;
-    const accept = req?.accepts?.[0];
-    if (!accept) throw new Error("402 without usable PaymentRequirements");
+    const accepts = Array.isArray(req?.accepts) ? req.accepts : [];
+    if (accepts.length === 0) throw new Error("402 without usable PaymentRequirements");
+    // Servers may list the same offer under several network namings (legacy
+    // "arc-testnet" and CAIP-2 "eip155:5042002"). Pick the first entry naming a
+    // network this agent is configured for; entries without a network pass too.
+    const accept = accepts.find((a) => !a?.network || networkMatches(NET, a.network));
+    if (!accept) {
+      const quoted = accepts.map((a) => a?.network).filter(Boolean).join(", ") || "(none)";
+      throw new Error(`network mismatch: server quoted [${quoted}] but agent is on "${NET.x402Network}"`);
+    }
 
     // V-10/V-11: never trust the server amount blindly. fromUsdcBaseUnits throws on any
     // malformed/negative/NaN value, and the maxPrice check is done in integer base units
@@ -71,12 +79,10 @@ export function createX402Fetch({
     } catch {
       throw new Error(`server sent an invalid amount: ${JSON.stringify(accept.maxAmountRequired)}`);
     }
-    // MN-1: never settle on a network mismatch — a server quoting a different network than
-    // the agent is configured for is a red flag (and a way to trick a mainnet agent onto a
-    // worthless chain or vice-versa).
-    if (accept.network && accept.network !== NET.x402Network) {
-      throw new Error(`network mismatch: server quoted "${accept.network}" but agent is on "${NET.x402Network}"`);
-    }
+    // MN-1: never settle on a network mismatch — a server quoting only networks the agent
+    // isn't configured for is a red flag (and a way to trick a mainnet agent onto a
+    // worthless chain or vice-versa). With the accepts[] scan above, "no matching entry"
+    // IS the mismatch case.
     const human = fromUsdcBaseUnits(requiredBase.toString());
     onEvent({ type: "quote", price: human, network: accept.network, payTo: accept.payTo });
     if (maxPrice != null) {
