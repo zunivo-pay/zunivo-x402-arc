@@ -4,8 +4,9 @@
  * Wrap any endpoint call so your agent pays automatically when it hits a 402 —
  * discover price, pay on Arc, retry with proof, get data. One function.
  *
- *   import { createX402Fetch } from "@zunivo/x402-arc/client";
- *   const x402fetch = createX402Fetch({ privateKey: process.env.AGENT_PK });
+ *   import { createX402Fetch } from "zunivo-x402-arc/client";
+ *   const x402fetch = createX402Fetch({ privateKey: process.env.AGENT_PK });   // Arc MAINNET by default
+ *   // sandbox: createX402Fetch({ privateKey, network: "arc-testnet" })
  *   const res = await x402fetch("https://api.example.dev/v1/data");
  *   const data = await res.json();   // paid for, on-chain, no human
  *
@@ -18,13 +19,13 @@ import {
   keccak256, toHex, parseAbi, defineChain,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { resolveNetwork, networkMatches, encodeHeader, decodeHeader, fromUsdcBaseUnits, toUsdcBaseUnits, cmpBaseUnits } from "./arc.mjs";
+import { resolveNetwork, networkMatches, isMainnet, DEFAULT_NETWORK, encodeHeader, decodeHeader, fromUsdcBaseUnits, toUsdcBaseUnits, cmpBaseUnits } from "./arc.mjs";
 
 const ROUTER_ABI = parseAbi(["function pay(bytes32 orderId, address merchant) payable"]);
 
 export function createX402Fetch({
   privateKey, maxPrice, expectRecipient,
-  network = "arc-testnet",           // MN-1: choose "arc" (mainnet) or "arc-testnet" explicitly
+  network = DEFAULT_NETWORK,         // "arc" (MAINNET, default since 1.0.0) or "arc-testnet"
   requireExpectRecipient = false,    // MN-2: when true, refuse to pay unless expectRecipient is set
   onEvent = () => {}, settleTimeoutMs = 120_000,
 }) {
@@ -33,7 +34,7 @@ export function createX402Fetch({
   const ROUTER = NET.router;
   // MN-2: on mainnet, blindly trusting the server's payTo address is a real-money risk.
   // Require the caller to pin the expected recipient (or explicitly opt out on testnet).
-  if (network === "arc" && !expectRecipient && !requireExpectRecipient) {
+  if (isMainnet(NET) && !expectRecipient && !requireExpectRecipient) {
     // default-safe on mainnet: warn loudly via event; callers should set expectRecipient.
     onEvent({ type: "warn", message: "mainnet without expectRecipient — paying whatever address the server quotes" });
   }
@@ -61,7 +62,7 @@ export function createX402Fetch({
     const accepts = Array.isArray(req?.accepts) ? req.accepts : [];
     if (accepts.length === 0) throw new Error("402 without usable PaymentRequirements");
     // Servers may list the same offer under several network namings (legacy
-    // "arc-testnet" and CAIP-2 "eip155:5042002"). Pick the first entry naming a
+    // "arc"/"arc-testnet" and CAIP-2 "eip155:5042"/"eip155:5042002"). Pick the first entry naming a
     // network this agent is configured for; entries without a network pass too.
     const accept = accepts.find((a) => !a?.network || networkMatches(NET, a.network));
     if (!accept) {
