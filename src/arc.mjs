@@ -1,12 +1,18 @@
 /**
- * Arc Testnet constants for x402 payments.
+ * Arc network constants for x402 payments (mainnet + testnet).
  *
  * IMPORTANT decimals note (source: Arc docs):
  *   - Native USDC gas token uses 18 decimals.
  *   - USDC ERC-20 interface (the one x402 / EIP-3009 uses) uses 6 decimals.
  * x402 amounts are ERC-20 amounts → ALWAYS 6 decimals here. Never mix with the
  * 18-decimal native path (that's what our router `pay()` uses for gas-value sends).
+ *
+ * DEFAULT NETWORK (since 1.0.0): "arc" = Arc MAINNET, real USDC. Pass
+ * network:"arc-testnet" explicitly for the free sandbox. Set DEFAULT_NETWORK
+ * via env ZUNIVO_NETWORK if you want a process-wide override.
  */
+export const DEFAULT_NETWORK = process.env.ZUNIVO_NETWORK || "arc";
+
 export const ARC_TESTNET = {
   chainId: 5042002,
   name: "Arc Testnet",
@@ -19,6 +25,7 @@ export const ARC_TESTNET = {
   router: "0x4210D40a9899e42b4946B9dC7E0C35d3cf14Ea55",
   // x402 network identifier used in PaymentRequirements.network
   x402Network: "arc-testnet",
+  mainnet: false,
   // CAIP-2 identifier — the standards-based name catalogs index by
   // (Circle's Discovery API filters on this form). Emitted alongside the
   // legacy name so both old clients and standards-first tooling match.
@@ -26,30 +33,38 @@ export const ARC_TESTNET = {
 };
 
 /**
- * MN-1/MN-5: Arc MAINNET config — PLACEHOLDER. Every value here MUST be replaced with the
- * real Arc mainnet values (chainId, RPC, USDC ERC-20 address, decimals, deployed router)
- * from Arc's mainnet docs before moving real money. The SDK will REFUSE to run on mainnet
- * while any field is still the "0xMAINNET…" / 0 sentinel, so a half-configured mainnet can
- * never silently settle. Do NOT assume mainnet == testnet — confirm each value on-chain.
+ * Arc MAINNET — live since 2026-09-16. Every value below was confirmed on-chain
+ * (chainId via eth_chainId, USDC/router via the verified v1.3 deployment, see
+ * zunivo-contracts/deployments/arc-mainnet-v1.3.json). Real money.
  */
 export const ARC_MAINNET = {
-  chainId: 0,                                   // TODO: real Arc mainnet chainId
+  chainId: 5042,
   name: "Arc",
-  rpcUrl: "",                                   // TODO: real Arc mainnet RPC
-  explorer: "",                                 // TODO: real Arc mainnet explorer
-  usdc: "0xMAINNET_USDC_ADDRESS_UNSET",         // TODO: confirm mainnet USDC ERC-20 + decimals on-chain
-  usdcDecimals: 6,                              // TODO: confirm on mainnet (do not assume)
-  router: "0xMAINNET_ROUTER_ADDRESS_UNSET",     // TODO: mainnet ArcPayRouter deploy
+  rpcUrl: process.env.ZUNIVO_MAINNET_RPC_URL || "https://rpc.mainnet.arc.io",
+  explorer: "https://arc.etherscan.io",
+  // Native USDC's ERC-20 interface (6 decimals) — same address as testnet by design.
+  usdc: "0x3600000000000000000000000000000000000000",
+  usdcDecimals: 6,
+  // ArcPayRouter v1.3 (mainnet), verified on arc.etherscan.io.
+  router: "0xAa8c293495446d04a51A32e2e4557EDE3BfC7119",
   x402Network: "arc",
-  caip2: "",                                    // TODO: eip155:<mainnet chainId> once published
+  mainnet: true,
+  caip2: "eip155:5042",
 };
 
-/** Networks by x402 identifier. Callers pass network:"arc"|"arc-testnet" (or the
- *  CAIP-2 form "eip155:5042002"); default stays testnet. */
+/** True when a resolved config (or a network name) is Arc MAINNET (real money). */
+export function isMainnet(cfgOrName) {
+  const cfg = typeof cfgOrName === "string" ? NETWORKS[cfgOrName] : cfgOrName;
+  return Boolean(cfg && cfg.mainnet);
+}
+
+/** Networks by x402 identifier. Callers pass network:"arc"|"arc-testnet" or the
+ *  CAIP-2 form ("eip155:5042" | "eip155:5042002"). Default is MAINNET ("arc"). */
 export const NETWORKS = {
-  "arc-testnet": ARC_TESTNET,
   "arc": ARC_MAINNET,
-  "eip155:5042002": ARC_TESTNET,   // CAIP-2 alias
+  "arc-testnet": ARC_TESTNET,
+  "eip155:5042": ARC_MAINNET,      // CAIP-2 alias (mainnet)
+  "eip155:5042002": ARC_TESTNET,   // CAIP-2 alias (testnet)
 };
 
 /** True when an x402 `network` value refers to this config (legacy or CAIP-2 form). */
@@ -62,9 +77,9 @@ export function networkMatches(cfg, value) {
  * placeholders are still unset throws — you cannot accidentally move real money on a
  * half-configured chain. (MN-1/MN-5)
  */
-export function resolveNetwork(network = "arc-testnet") {
+export function resolveNetwork(network = DEFAULT_NETWORK) {
   const cfg = NETWORKS[network];
-  if (!cfg) throw new Error(`unknown network "${network}" (expected "arc" or "arc-testnet")`);
+  if (!cfg) throw new Error(`unknown network "${network}" (expected "arc", "arc-testnet", "eip155:5042" or "eip155:5042002")`);
   const unset =
     !cfg.chainId ||
     !cfg.rpcUrl ||

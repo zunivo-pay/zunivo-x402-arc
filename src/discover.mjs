@@ -13,6 +13,7 @@
  */
 import { createPublicClient, http, parseAbi } from "viem";
 import { createX402Fetch } from "./client.mjs";
+import { resolveNetwork, DEFAULT_NETWORK } from "./arc.mjs";
 
 export const STANDARD_KEYS = ["url", "x402", "description", "avatar"];
 
@@ -23,11 +24,20 @@ const NAMES_ABI = parseAbi([
   "function resolve(string label) view returns (address)",
 ]);
 
-const DEFAULTS = {
-  rpcUrl: process.env.ZUNIVO_RPC_URL ?? "https://rpc.testnet.arc.network",
-  recordsAddress: process.env.ZUNIVO_RECORDS_ADDRESS ?? "",
-  namesAddress: process.env.ZUNIVO_NAMES_ADDRESS ?? "0x244e0c8bE1Ed59636901F98920413d414B158cc5",
+// Per-network registry addresses (ZunivoNames / ZunivoAgentRecords).
+const REGISTRY = {
+  "arc":         { names: "0x824218447E8Dbf10E535dC7fB6ab7b68105c7dDa", records: "0xFE9fca63CaA64FBf0B2F089786A706f0C99dCbB1" }, // v1.3 mainnet
+  "arc-testnet": { names: "0x244e0c8bE1Ed59636901F98920413d414B158cc5", records: "0x4f405f0aA04FD6FaE0838DeE6FD184B1f3cC306B" }, // live testnet
 };
+function defaultsFor(network = DEFAULT_NETWORK) {
+  const NET = resolveNetwork(network);
+  const reg = REGISTRY[NET.x402Network];
+  return {
+    rpcUrl: process.env.ZUNIVO_RPC_URL ?? NET.rpcUrl,
+    recordsAddress: process.env.ZUNIVO_RECORDS_ADDRESS ?? reg.records,
+    namesAddress: process.env.ZUNIVO_NAMES_ADDRESS ?? reg.names,
+  };
+}
 
 /** "data.agent" | "@data" | "data" → "data" (or null if invalid) */
 export function parseAgentName(input) {
@@ -43,7 +53,7 @@ export function parseAgentName(input) {
  */
 export async function discoverAgent(name, opts = {}) {
   const clean = Object.fromEntries(Object.entries(opts).filter(([, v]) => v !== undefined && v !== ""));
-  const { rpcUrl, recordsAddress, namesAddress, client } = { ...DEFAULTS, ...clean };
+  const { rpcUrl, recordsAddress, namesAddress, client } = { ...defaultsFor(clean.network), ...clean };
   const label = parseAgentName(name);
   if (!label) throw new Error(`discoverAgent: invalid agent name "${name}"`);
   if (!recordsAddress) {
@@ -75,13 +85,13 @@ export async function discoverAgent(name, opts = {}) {
  * Discover + connect in one step: returns the agent card plus a `fetch`
  * bound to the agent's endpoint with x402 payments handled automatically.
  */
-export async function connectAgent(name, { privateKey, maxPrice, ...discoverOpts } = {}) {
-  const card = await discoverAgent(name, discoverOpts);
+export async function connectAgent(name, { privateKey, maxPrice, network, ...discoverOpts } = {}) {
+  const card = await discoverAgent(name, { ...discoverOpts, network });
   if (!card.endpoint) {
     throw new Error(`connectAgent: ${card.name} has not published a service endpoint ("url" record)`);
   }
   if (!privateKey) throw new Error("connectAgent: privateKey required to pay for calls");
-  const paidFetch = createX402Fetch({ privateKey, maxPrice, expectRecipient: card.address });
+  const paidFetch = createX402Fetch({ privateKey, maxPrice, expectRecipient: card.address, ...(network ? { network } : {}) });
   return {
     ...card,
     fetch: (path = "", init) => paidFetch(new URL(path, card.endpoint).toString(), init),

@@ -17,7 +17,7 @@
  *   const pay = paymentRequired({ price: "0.05", payTo: "you.agent", zunivoApi, zunivoKey });
  *   app.get("/v1/data", pay, handler);
  */
-import { resolveNetwork, toUsdcBaseUnits, encodeHeader, decodeHeader } from "./arc.mjs";
+import { resolveNetwork, isMainnet, DEFAULT_NETWORK, toUsdcBaseUnits, encodeHeader, decodeHeader } from "./arc.mjs";
 
 /**
  * Default replay store: in-memory Map. NOTE: single-process and cleared on restart.
@@ -58,7 +58,7 @@ export function paymentRequired(opts) {
   } = opts;
 
   const {
-    network = "arc-testnet",   // MN-1: "arc" (mainnet) or "arc-testnet"
+    network = DEFAULT_NETWORK, // "arc" (MAINNET, default since 1.0.0) or "arc-testnet"
   } = opts;
   const NET = resolveNetwork(network);   // throws on unknown / half-configured mainnet
 
@@ -71,7 +71,7 @@ export function paymentRequired(opts) {
   // MN-4: the in-memory replay store is single-process and clears on restart. On mainnet that
   // means a real payment can be double-spent across instances/restarts. Refuse to boot on
   // mainnet unless the caller supplies a durable, shared consumedStore (Redis/DB).
-  if (network === "arc" && !opts.consumedStore) {
+  if (isMainnet(NET) && !opts.consumedStore) {
     throw new Error(
       "mainnet requires a durable shared consumedStore (e.g. Redis) — the default in-memory " +
       "store is single-process and would allow real payments to be replayed across instances.",
@@ -86,8 +86,8 @@ export function paymentRequired(opts) {
 
     // Build the standard PaymentRequirements for this resource.
     // Two entries for the SAME terms, differing only in the network identifier:
-    //   accepts[0] — legacy name ("arc-testnet"): every already-shipped client matches it.
-    //   accepts[1] — CAIP-2 ("eip155:5042002"): what standards-first tooling and
+    //   accepts[0] — legacy name ("arc" / "arc-testnet"): every already-shipped client matches it.
+    //   accepts[1] — CAIP-2 ("eip155:5042" / "eip155:5042002"): what standards-first tooling and
     //                catalogs (e.g. Circle's Discovery API) index by.
     const baseAccept = {
       scheme: "exact",

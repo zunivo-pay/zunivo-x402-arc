@@ -18,7 +18,7 @@ import {
   verifyTypedData, parseSignature,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { resolveNetwork, toUsdcBaseUnits } from "./arc.mjs";
+import { resolveNetwork, DEFAULT_NETWORK, toUsdcBaseUnits } from "./arc.mjs";
 
 function chainFor(network) {
   const NET = resolveNetwork(network);
@@ -56,7 +56,7 @@ async function domain(pub, NET) {
 }
 
 /** AGENT SIDE: build a signed TransferWithAuthorization payload for an x402 `exact` payment. */
-export async function signPayment({ privateKey, to, price, validForSeconds = 300, network = "arc-testnet" }) {
+export async function signPayment({ privateKey, to, price, validForSeconds = 300, network = DEFAULT_NETWORK }) {
   const account = privateKeyToAccount(privateKey);
   const { NET, chain } = chainFor(network);
   const pub = createPublicClient({ chain, transport: http() });
@@ -76,7 +76,7 @@ export async function signPayment({ privateKey, to, price, validForSeconds = 300
 }
 
 /** FACILITATOR SIDE: verify the signature, then submit it on Arc to settle. */
-export function createFacilitator({ submitterKey, network = "arc-testnet" }) {
+export function createFacilitator({ submitterKey, network = DEFAULT_NETWORK }) {
   const { NET, chain } = chainFor(network);
   // MN-3: this EIP-3009 path moves funds by submitting signed authorizations directly to the
   // USDC contract. Arc's exact 3009 selectors + EIP-712 domain (name/version) MUST be confirmed
