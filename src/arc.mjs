@@ -18,7 +18,7 @@ export const ARC_TESTNET = {
   name: "Arc Testnet",
   rpcUrl: "https://rpc.testnet.arc.network",
   explorer: "https://testnet.arcscan.app",
-  // USDC ERC-20 interface (6 decimals) — the token x402 authorizations are signed against.
+  // USDC ERC-20 interface (6 decimals), the token x402 authorizations are signed against.
   usdc: "0x3600000000000000000000000000000000000000",
   usdcDecimals: 6,
   // ArcPayRouter for the Zunivo-order settlement backend (testnet deploy).
@@ -26,14 +26,14 @@ export const ARC_TESTNET = {
   // x402 network identifier used in PaymentRequirements.network
   x402Network: "arc-testnet",
   mainnet: false,
-  // CAIP-2 identifier — the standards-based name catalogs index by
+  // CAIP-2 identifier, the standards-based name catalogs index by
   // (Circle's Discovery API filters on this form). Emitted alongside the
   // legacy name so both old clients and standards-first tooling match.
   caip2: "eip155:5042002",
 };
 
 /**
- * Arc MAINNET — live since 2026-09-16. Every value below was confirmed on-chain
+ * Arc MAINNET, live since 2026-09-16. Every value below was confirmed on-chain
  * (chainId via eth_chainId, USDC/router via the verified v1.3 deployment, see
  * zunivo-contracts/deployments/arc-mainnet-v1.3.json). Real money.
  */
@@ -42,7 +42,7 @@ export const ARC_MAINNET = {
   name: "Arc",
   rpcUrl: process.env.ZUNIVO_MAINNET_RPC_URL || "https://rpc.mainnet.arc.io",
   explorer: "https://arc.etherscan.io",
-  // Native USDC's ERC-20 interface (6 decimals) — same address as testnet by design.
+  // Native USDC's ERC-20 interface (6 decimals), same address as testnet by design.
   usdc: "0x3600000000000000000000000000000000000000",
   usdcDecimals: 6,
   // ArcPayRouter v1.3 (mainnet), verified on arc.etherscan.io.
@@ -72,11 +72,7 @@ export function networkMatches(cfg, value) {
   return value === cfg.x402Network || (cfg.caip2 !== "" && value === cfg.caip2);
 }
 
-/**
- * Resolve a network config by name and REFUSE if it isn't safe to use. A mainnet whose
- * placeholders are still unset throws — you cannot accidentally move real money on a
- * half-configured chain. (MN-1/MN-5)
- */
+/** Resolve a network config by name. Throws if the config is incomplete. */
 export function resolveNetwork(network = DEFAULT_NETWORK) {
   const cfg = NETWORKS[network];
   if (!cfg) throw new Error(`unknown network "${network}" (expected "arc", "arc-testnet", "eip155:5042" or "eip155:5042002")`);
@@ -88,24 +84,20 @@ export function resolveNetwork(network = DEFAULT_NETWORK) {
   if (unset) {
     throw new Error(
       `network "${network}" is not fully configured (chainId/rpcUrl/usdc/router). ` +
-      `Fill ARC_MAINNET with real Arc mainnet values before using it — the SDK refuses to ` +
-      `move funds on a half-configured network.`,
+      `The SDK won't move funds on an incomplete network config.`,
     );
   }
   return cfg;
 }
 
 /**
- * Convert a human USDC string ("0.05") to a 6-decimal base-unit string ("50000").
- * STRICT: only a clean non-negative decimal is accepted. Anything else (scientific
- * notation, commas, hex, signs, whitespace, NaN, >6 dp) throws — never silently
- * produces a garbage amount. Both the server price path and the agent-signing path
- * rely on this, so a malformed amount must fail loud, not settle wrong. (V-5)
+ * "0.05" -> "50000" (6-decimal base units). Only a plain non-negative decimal with
+ * at most 6 places is accepted; anything else throws.
  */
 export function toUsdcBaseUnits(human) {
   const s = String(human).trim();
   if (!/^\d+(\.\d+)?$/.test(s)) {
-    throw new Error(`invalid USDC amount "${human}" — expected a non-negative decimal like "0.05"`);
+    throw new Error(`invalid USDC amount "${human}": expected a non-negative decimal like "0.05"`);
   }
   const [whole, frac = ""] = s.split(".");
   if (frac.length > 6) {
@@ -117,15 +109,13 @@ export function toUsdcBaseUnits(human) {
 }
 
 /**
- * Convert a 6-decimal base-unit string back to a human USDC string.
- * STRICT: base units are integer base-10; reject anything else so a hostile
- * server-sent maxAmountRequired can't smuggle NaN/negatives past a client's
- * maxPrice check. (V-10/V-11)
+ * "50000" -> "0.05". Input must be a non-negative integer string, so a bad
+ * maxAmountRequired from a server can't get past the client's maxPrice check.
  */
 export function fromUsdcBaseUnits(base) {
   const s = String(base).trim();
   if (!/^\d+$/.test(s)) {
-    throw new Error(`invalid USDC base-unit amount "${base}" — expected a non-negative integer string`);
+    throw new Error(`invalid USDC base-unit amount "${base}": expected a non-negative integer string`);
   }
   const p = s.padStart(7, "0");
   const whole = p.slice(0, -6).replace(/^0+(?=\d)/, "");
@@ -133,7 +123,7 @@ export function fromUsdcBaseUnits(base) {
   return frac ? `${whole}.${frac}` : whole;
 }
 
-/** Compare two USDC amounts exactly as integers (never via float). Returns -1/0/1. (V-11) */
+/** Compare two base-unit amounts as BigInt. Returns -1/0/1. */
 export function cmpBaseUnits(aBase, bBase) {
   const A = BigInt(aBase), B = BigInt(bBase);
   return A < B ? -1 : A > B ? 1 : 0;
@@ -144,7 +134,7 @@ export function encodeHeader(obj) {
   return Buffer.from(JSON.stringify(obj), "utf8").toString("base64");
 }
 
-/** Max accepted size for an inbound base64 header payload (DoS guard). (V-8) */
+/** Max size of an inbound base64 header payload. */
 export const MAX_HEADER_B64 = 8192;
 
 /** Decode a base64 JSON header back to an object; returns null on failure or oversize. */

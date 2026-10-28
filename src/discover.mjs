@@ -1,15 +1,11 @@
 /**
- * discover.mjs — the service-discovery half of the Zunivo network.
- *
- * A .agent name is more than a payment route: its holder can publish text
- * records (ZunivoAgentRecords on Arc) that describe a callable service —
- * endpoint URL, x402 manifest, description. This module lets an agent go
- * from a human-readable name to a paid API call in two lines:
+ * Service discovery. The holder of a .agent name can publish text records
+ * (ZunivoAgentRecords) with an endpoint URL, x402 manifest and description.
  *
  *   const data = await connectAgent("data.agent", { privateKey: AGENT_PK });
- *   const res  = await data.fetch("/v1/index/crypto");   // 402 handled, USDC paid
+ *   const res  = await data.fetch("/v1/index/crypto");   // pays the 402
  *
- * Standard record keys: "url", "x402", "description", "avatar".
+ * Record keys: "url", "x402", "description", "avatar".
  */
 import { createPublicClient, http, parseAbi } from "viem";
 import { createX402Fetch } from "./client.mjs";

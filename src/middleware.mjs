@@ -1,34 +1,29 @@
 /**
- * paymentRequired() — x402-standard paywall middleware for Arc, Express-compatible.
+ * paymentRequired(): x402 paywall middleware for Express.
  *
- * Speaks the x402 wire protocol (the one ~69k agents already use):
- *   1. No payment  → 402 with a `PaymentRequirements` object (body + PAYMENT-REQUIRED header)
- *   2. Client attaches an `X-PAYMENT` header (base64 JSON payment payload) and retries
- *   3. Middleware verifies the payment settled on Arc, then serves the resource and
- *      returns an `X-PAYMENT-RESPONSE` header (base64 JSON settlement receipt)
+ *   1. no payment     -> 402 with PaymentRequirements (body + PAYMENT-REQUIRED header)
+ *   2. client retries with an X-PAYMENT header (base64 JSON)
+ *   3. we verify the payment settled on Arc, serve the route, add X-PAYMENT-RESPONSE
  *
- * Settlement backend is pluggable via `verify`:
- *   - default: Zunivo settlement (order created up-front, paid on Arc via our verified
- *     router, confirmed through the Zunivo API) — works today, no new onchain code.
- *   - advanced: an EIP-3009 facilitator (see facilitator.mjs) for gasless signature pay.
+ * Settlement is pluggable via `verify`. Default is a Zunivo order paid through
+ * the ArcPayRouter and confirmed through the Zunivo API. facilitator.mjs has an
+ * EIP-3009 variant for gasless signature payments.
  *
- * Three lines to protect any route:
- *   import { paymentRequired } from "@zunivo/x402-arc";
+ *   import { paymentRequired } from "zunivo-x402-arc";
  *   const pay = paymentRequired({ price: "0.05", payTo: "you.agent", zunivoApi, zunivoKey });
  *   app.get("/v1/data", pay, handler);
  */
 import { resolveNetwork, isMainnet, DEFAULT_NETWORK, toUsdcBaseUnits, encodeHeader, decodeHeader } from "./arc.mjs";
 
 /**
- * Default replay store: in-memory Map. NOTE: single-process and cleared on restart.
- * For production (multi-instance or restart-durable) pass `consumedStore` — any object
- * with async has(key)/add(key). A settled order must be consumable exactly once, ever.
+ * Default replay store. In-memory, so single process and gone on restart.
+ * For production pass `consumedStore`: anything with async reserve(key), or has/add.
+ * A settled payment must only ever be consumed once.
  */
 function memoryStore() {
   const seen = new Set();
   return {
-    // Atomic check-and-reserve: returns true if this key was NEW (now reserved),
-    // false if already consumed. Synchronous set ops = no TOCTOU gap. (F-2)
+    // check-and-reserve in one step. true if the key was new, false if already used.
     async reserve(k) { if (seen.has(k)) return false; seen.add(k); return true; },
     // Back-compat shims for stores that only implement has/add.
     async has(k) { return seen.has(k); },
@@ -36,8 +31,7 @@ function memoryStore() {
   };
 }
 
-// Reserve a key atomically across any store shape: prefer a native atomic reserve(),
-// fall back to has()+add() (non-atomic — only safe single-process). (F-2)
+// Prefer the store's own reserve(). has()+add() is a fallback and is only race-free in a single process.
 async function reserveOnce(store, key) {
   if (typeof store.reserve === "function") return store.reserve(key);
   if (await store.has(key)) return false;
@@ -54,7 +48,7 @@ export function paymentRequired(opts) {
     description = "",
     verify,               // optional custom verifier(paymentPayload, requirements) -> { settled, txHash }
     resource,             // optional canonical resource URL
-    consumedStore = memoryStore(),   // V-1: pluggable, so replay survives restarts / spans instances
+    consumedStore = memoryStore(),   // pluggable, so replay survives restarts / spans instances
   } = opts;
 
   const {
@@ -62,18 +56,17 @@ export function paymentRequired(opts) {
   } = opts;
   const NET = resolveNetwork(network);   // throws on unknown / half-configured mainnet
 
-  // Validate price up front — a malformed/negative price must fail loud, not settle weird.
+  // Reject a bad price at construction rather than at settlement time.
   const priceNum = Number(price);
   if (!Number.isFinite(priceNum) || priceNum < 0) {
     throw new Error(`paymentRequired: invalid price "${price}" (must be a non-negative number)`);
   }
 
-  // MN-4: the in-memory replay store is single-process and clears on restart. On mainnet that
-  // means a real payment can be double-spent across instances/restarts. Refuse to boot on
-  // mainnet unless the caller supplies a durable, shared consumedStore (Redis/DB).
+  // On mainnet an in-memory replay store would let a real payment be reused after a restart
+  // or across instances, so require a durable one.
   if (isMainnet(NET) && !opts.consumedStore) {
     throw new Error(
-      "mainnet requires a durable shared consumedStore (e.g. Redis) — the default in-memory " +
+      "mainnet requires a durable shared consumedStore (e.g. Redis). The default in-memory " +
       "store is single-process and would allow real payments to be replayed across instances.",
     );
   }
@@ -84,11 +77,9 @@ export function paymentRequired(opts) {
     const payHeader = req.header("X-PAYMENT") || req.header("PAYMENT-SIGNATURE");
     const resourceUrl = resource || `${req.protocol}://${req.get("host")}${req.originalUrl}`;
 
-    // Build the standard PaymentRequirements for this resource.
-    // Two entries for the SAME terms, differing only in the network identifier:
-    //   accepts[0] — legacy name ("arc" / "arc-testnet"): every already-shipped client matches it.
-    //   accepts[1] — CAIP-2 ("eip155:5042" / "eip155:5042002"): what standards-first tooling and
-    //                catalogs (e.g. Circle's Discovery API) index by.
+    // Same offer listed twice: once under the legacy network name ("arc" / "arc-testnet"),
+    // once under the CAIP-2 id ("eip155:5042" / "eip155:5042002") that catalogs like
+    // Circle's Discovery API index by.
     const baseAccept = {
       scheme: "exact",
       maxAmountRequired: toUsdcBaseUnits(price),   // 6-decimal base units
@@ -135,7 +126,7 @@ export function paymentRequired(opts) {
     const payload = decodeHeader(payHeader);
     if (!payload) return res.status(402).json({ ...requirements, error: "malformed X-PAYMENT header" });
 
-    // Verify FIRST (V-4: never trust a client-forgeable idem key before verification).
+    // Verify before touching the replay store; the idempotency key comes from the client.
     let result;
     try {
       result = await settle.verify(payload, requirements.accepts[0]);
@@ -149,15 +140,14 @@ export function paymentRequired(opts) {
       });
     }
 
-    // V-1: replay key is built from SETTLED facts (resource + order + on-chain tx), not raw input,
-    // and scoped to THIS resource so one payment unlocks one resource once.
+    // Replay key is built from settled facts (resource + order + tx), scoped to this resource,
+    // so one payment unlocks one resource once.
     const orderId = payload?.zunivoOrderId || payload?.payload?.authorization?.nonce || "";
     const replayKey = `${resourceUrl}::${orderId}::${result.txHash ?? ""}`;
-    // F-2: atomic reserve closes the check-then-add race — two concurrent requests
-    // carrying the same settled payment can no longer both be served.
+    // Atomic reserve so two concurrent requests with the same payment can't both be served.
     const fresh = await reserveOnce(consumedStore, replayKey);
     if (!fresh) {
-      return res.status(402).json({ ...requirements, error: "payment already consumed — pay again for another call" });
+      return res.status(402).json({ ...requirements, error: "payment already consumed, pay again for another call" });
     }
     res.setHeader(
       "X-PAYMENT-RESPONSE",
@@ -168,11 +158,9 @@ export function paymentRequired(opts) {
 }
 
 /**
- * Default settlement backend: Zunivo orders + our verified Arc router.
- * `quote()` mints an order; `verify()` confirms it settled.
- * The X-PAYMENT payload for this backend is simply { zunivoOrderId } (the agent pays
- * the order on Arc, then attaches its id). This is the "standard face, Zunivo settlement"
- * path that works today with zero new onchain code.
+ * Default settlement backend: Zunivo orders paid through the ArcPayRouter.
+ * quote() creates an order, verify() checks it settled.
+ * X-PAYMENT payload is { zunivoOrderId }.
  */
 function zunivoVerify({ zunivoApi, zunivoKey }) {
   return {
@@ -192,9 +180,8 @@ function zunivoVerify({ zunivoApi, zunivoKey }) {
       if (!r.ok) throw new Error("unknown order");
       const order = await r.json();
 
-      // V-2: a paid order is NOT a blank pass. It must be the RIGHT order —
-      // paid to THIS resource's payTo, for AT LEAST the required amount.
-      // Otherwise a cheap or someone-else's order could unlock an expensive endpoint.
+      // A paid order is not enough on its own. It has to be paid to this resource's payTo
+      // for at least the required amount, or a cheap order could unlock an expensive route.
       const paid = order.status === "paid";
       if (paid && accept) {
         const requiredBase = BigInt(accept.maxAmountRequired);                 // 6-dec base units

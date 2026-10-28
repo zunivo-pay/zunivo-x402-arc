@@ -1,17 +1,12 @@
 /**
- * EIP-3009 facilitator (ADVANCED / gasless path) for x402 on Arc.
+ * EIP-3009 facilitator for x402 on Arc (gasless path).
  *
- * This is the fully-standard x402 scheme: the agent signs a TransferWithAuthorization
- * message (no gas, no prior approval); the facilitator submits it to Arc's USDC ERC-20
- * contract, which verifies the signature and moves USDC atomically.
+ * The agent signs a TransferWithAuthorization; the facilitator submits it to the USDC
+ * contract, which checks the signature and moves the funds.
  *
- * Status: reference implementation against Circle v2 USDC (Arc's USDC supports EIP-3009).
- * It is provided so agents that already speak standard x402 can pay Zunivo endpoints with
- * zero custom code. Whether Arc's USDC exposes the exact 3009 selectors must be confirmed
- * on-chain before relying on this in production — until then, the Zunivo-order backend in
- * middleware.mjs is the tested settlement path. See docs: "Two settlement backends".
- *
- * EIP-712 domain / types follow the USDC v2 (FiatTokenV2) TransferWithAuthorization schema.
+ * Reference implementation against Circle's FiatTokenV2 schema. Confirm the 3009
+ * selectors and EIP-712 domain on Arc before using this in production; the order
+ * backend in middleware.mjs is the path that's been exercised on mainnet.
  */
 import {
   createWalletClient, createPublicClient, http, parseAbi, defineChain,
@@ -48,14 +43,14 @@ const TYPES = {
 };
 
 async function domain(pub, NET) {
-  // USDC v2 EIP-712 domain. name/version read on-chain when available.
+  // name/version are read from the contract when available
   let name = "USDC", version = "2";
   try { name = await pub.readContract({ address: NET.usdc, abi: USDC_3009_ABI, functionName: "name" }); } catch {}
   try { version = await pub.readContract({ address: NET.usdc, abi: USDC_3009_ABI, functionName: "version" }); } catch {}
   return { name, version, chainId: NET.chainId, verifyingContract: NET.usdc };
 }
 
-/** AGENT SIDE: build a signed TransferWithAuthorization payload for an x402 `exact` payment. */
+/** Agent side: sign a TransferWithAuthorization for an x402 `exact` payment. */
 export async function signPayment({ privateKey, to, price, validForSeconds = 300, network = DEFAULT_NETWORK }) {
   const account = privateKeyToAccount(privateKey);
   const { NET, chain } = chainFor(network);
@@ -75,20 +70,17 @@ export async function signPayment({ privateKey, to, price, validForSeconds = 300
   return { scheme: "exact", network: NET.x402Network, authorization: serialize(message), signature };
 }
 
-/** FACILITATOR SIDE: verify the signature, then submit it on Arc to settle. */
+/** Facilitator side: verify the signature, then submit it on Arc. */
 export function createFacilitator({ submitterKey, network = DEFAULT_NETWORK }) {
   const { NET, chain } = chainFor(network);
-  // MN-3: this EIP-3009 path moves funds by submitting signed authorizations directly to the
-  // USDC contract. Arc's exact 3009 selectors + EIP-712 domain (name/version) MUST be confirmed
-  // on the target chain before mainnet use. Until confirmed on mainnet, prefer the Zunivo-order
-  // settlement backend (middleware default). This is a documented pre-mainnet gate, not verified here.
+  // Submits signed authorizations straight to the USDC contract. Confirm the selectors and
+  // EIP-712 domain on the target chain before relying on this with real money.
   const pub = createPublicClient({ chain, transport: http() });
   const submitter = submitterKey
     ? createWalletClient({ account: privateKeyToAccount(submitterKey), chain, transport: http() })
     : null;
 
-  // Shared, self-contained check: recipient + amount + time-window + signature.
-  // Both verify() and settle() run this — settle NEVER submits an unchecked payload. (V-6)
+  // Shared check (recipient, amount, time window, signature). Both verify() and settle() run it.
   async function check(payload, accept) {
     if (!payload?.authorization || !payload?.signature) return { ok: false, status: "malformed payload" };
     let a;
@@ -120,17 +112,16 @@ export function createFacilitator({ submitterKey, network = DEFAULT_NETWORK }) {
     },
     async settle(payload, accept) {
       if (!submitter) throw new Error("facilitator has no submitterKey to pay gas");
-      // V-6: re-verify inside settle — signature, recipient, amount, time window — before any on-chain submit.
+      // re-check before submitting
       const r = await check(payload, accept);
       if (!r.ok) throw new Error(`refusing to settle: ${r.status}`);
       const a = r.authorization;
-      // V-7: parse signature with viem (handles 65-byte and EIP-2098 compact, validates length).
+      // viem handles 65-byte and EIP-2098 compact signatures
       const { r: sr, s: ss, v: sv, yParity } = parseSignature(payload.signature);
       const v = sv ?? (yParity != null ? BigInt(yParity) + 27n : undefined);
       if (v == null) throw new Error("signature missing v/yParity");
-      // V-9: prefer receiveWithAuthorization when the submitter IS the payee (front-run-safe:
-      // the token requires msg.sender == payee, so a relayer can't grief the nonce). Fall back
-      // to transferWithAuthorization only when submitting on behalf of a different payee.
+      // receiveWithAuthorization when the submitter is the payee (the token requires
+      // msg.sender == payee, so nobody else can burn the nonce). Otherwise transferWithAuthorization.
       const submitterAddr = submitter.account.address.toLowerCase();
       const fnName = submitterAddr === String(a.to).toLowerCase()
         ? "receiveWithAuthorization"
